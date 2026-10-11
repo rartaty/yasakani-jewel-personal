@@ -1,4 +1,4 @@
-# Yasakani Jewel -Personal Specification Version
+# Yasakani-Jewel-Personal
 
 **AI-Native Security Companion** — 常駐プロセスゼロで、Claude Code / Cursor / GitHub Copilot に多層セキュリティ監査を配線する、個人開発者向けの軽量・オンデマンドなセキュリティ監査ツール。
 
