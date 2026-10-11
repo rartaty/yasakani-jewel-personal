@@ -1,16 +1,20 @@
 #!/bin/sh
 # >>> YASAKANI JEWEL v1 (pre-commit) >>>
-#  Yasakani Jewel - ステージ済み差分のセキュリティ・プリスキャン
+#  Yasakani Jewel - ステージされた内容のセキュリティ検査
 #  ※ このブロックは `yasakani-jewel` CLI が自動管理します
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"
 SCANNER="$ROOT/.yasakani/scan.js"
-if [ -n "$ROOT" ] && [ -f "$SCANNER" ]; then
-  node "$SCANNER"
+if [ -z "$ROOT" ] || [ ! -f "$SCANNER" ]; then
+  echo "[Yasakani Jewel] scanner がないため検査できません。init を再実行してください。"
+  exit 2
+fi
+if [ -n "$ROOT" ]; then
+  node "$SCANNER" --staged
   rc=$?
   if [ "$rc" -ne 0 ]; then
     echo ""
     echo "[Yasakani Jewel] セキュリティ懸念を検知したためコミットを中断しました。"
-    echo "  内容を確認し、問題なければ:  git commit --no-verify"
+    echo "  検知内容または検査失敗を確認し、修正後に再実行してください。"
     exit "$rc"
   fi
 fi

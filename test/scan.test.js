@@ -38,6 +38,7 @@ const piiCases = [
   ['name: "yasakani-jewel"', false, 'package.json 等の汎用 name は PII 扱いしない'],
   ['const domain = "example.com";', false, 'ドメイン単体はメール扱いしない'],
   ['const nameFormatter = formatName(user);', false, 'name 識別子だけでは検知しない'],
+  ['uses: actions/setup-node@2951748f4c016b747952f8ca7e75fc64f2f62b53', false, '固定 SHA は郵便番号・電話番号ではない'],
 ];
 
 const promptCases = [
@@ -63,6 +64,8 @@ const entropyCases = [
   ['const k = "aB3dE5gH7jK9mN2pQ4rS6tU8vW";', true, 'compact token-like literal'],
   ['const msg = "AI system developer prompt format note";', false, 'normal prose literal with spaces'],
   ['const msg = "ネットワーク許可ドメイン設定らしき記述";', false, 'non-ascii prose literal'],
+  ['node "$RUNNER_TEMP/yasakani-tools/node_modules/yasakani-jewel/src/scan.js" --all', false, 'shell runtime path'],
+  ['node "$RUNNER_TEMP/aB3dE5gH7jK9mN2pQ4rS6tU8vW"', true, 'static random segment in runtime path remains detectable'],
 ];
 
 const scannableCases = [

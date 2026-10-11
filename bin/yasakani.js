@@ -13,7 +13,14 @@ const HELP = `
 
 使い方:
   npx yasakani-jewel init        プロジェクトに監査レイヤーを配線
-  npx yasakani-jewel scan [file] 手動スキャン (git 差分 / 指定ファイル)
+  npx yasakani-jewel init --ci   GitHub Actions の全体検査も生成
+  npx yasakani-jewel scan [file] ステージ内容 / 変更・未追跡 / 指定ファイル
+  npx yasakani-jewel scan --all [path...] 既存・未追跡・ignored の全ファイル
+  npx yasakani-jewel scan --history      ローカル Git の全 reachable 履歴
+  npx yasakani-jewel scan --staged       ステージ内容のみ（フック用）
+  npx yasakani-jewel audit logs <file.jsonl> [--profile profile.json]
+      [--since ISO日時] [--until ISO日時] [--json] [--output 新規ファイル]
+      外部ログを一度だけ点検（常駐・通信なし）
   npx yasakani-jewel uninstall   配線を除去
   npx yasakani-jewel help        このヘルプ
 
@@ -37,6 +44,12 @@ function main() {
       break;
     case 'scan':
       require(path.join(__dirname, '..', 'src', 'scan')).run(rest);
+      break;
+    case 'audit':
+      if (rest[0] !== 'logs') {
+        console.error('[Yasakani Jewel] audit logs にログファイルを指定してください。');
+        process.exitCode = 2;
+      } else require(path.join(__dirname, '..', 'src', 'audit-logs')).run(rest.slice(1));
       break;
     case 'uninstall':
       require(path.join(__dirname, '..', 'src', 'uninstall')).run(rest);

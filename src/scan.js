@@ -10,7 +10,7 @@
  * 出力方針: クリーン時は完全サイレント。懸念検知時のみ警告を出し exit 1。
  */
 
-const { execSync } = require('child_process');
+const { execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
@@ -23,12 +23,12 @@ const PHRASE_KEYWORDS = ['api_key', 'apikey', 'api-key', 'private_key', 'private
 
 const PII_LABEL_PATTERN = /(?:^|[^A-Za-z0-9_])(?:氏名|名前|本名|住所|所在地|連絡先|電話番号|携帯番号|メールアドレス|メール|email|e-mail|mail|address|full[_-]?name|real[_-]?name|phone|tel|mobile)\s*[:=：]\s*(["'`])?[^"'`\s,;{}[\]]{2,}/i;
 const EMAIL_PATTERN = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i;
-const JP_PHONE_PATTERN = /(?:\+81[-\s]?)?(?:0\d{1,4}[-\s]?\d{1,4}[-\s]?\d{3,4}|0[789]0[-\s]?\d{4}[-\s]?\d{4})/;
-const JP_POSTAL_PATTERN = /〒?\s*\d{3}-?\d{4}/;
+const JP_PHONE_PATTERN = /(?<![A-Za-z0-9])(?:\+81[-\s]?)?(?:0\d{1,4}[-\s]?\d{1,4}[-\s]?\d{3,4}|0[789]0[-\s]?\d{4}[-\s]?\d{4})(?![A-Za-z0-9])/;
+const JP_POSTAL_PATTERN = /(?<![A-Za-z0-9])〒?\s*\d{3}-?\d{4}(?![A-Za-z0-9])/;
 const JP_ADDRESS_PATTERN = /(?:都|道|府|県).{0,30}(?:市|区|町|村).{0,40}(?:丁目|番地|番|号|[0-9０-９]-[0-9０-９])/;
 
 const SCAN_EXTS = ['.js', '.ts', '.py', '.json', '.env', '.yml', '.yaml', '.md', '.mdx'];
-const SKIP_DIRS = ['node_modules', '.git', '.claude', '.idea', '.vscode', '.yasakani'];
+const SKIP_DIRS = ['node_modules', '.git', '.yasakani'];
 
 const PROMPT_INSTRUCTION_PATTERNS = [
   [/^#\s+.*\b(?:system|developer)\s+prompt\b/i, 'AI system/developer prompt 形式の Markdown'],
@@ -87,19 +87,37 @@ function splitToWords(line) {
 // 単なる識別子の行 (`function getToken(){}`) や、リテラル内にだけ語が在る行
 // (`console.log("...password...")`) を誤検知しないため、キーワードはリテラル本体を
 // 伏せた「コード部分」に対して照合する。ハードコードされた秘密情報の検出が狙い。
-function findKeyword(line) {
-  const literals = line.match(/(["'`])(.*?)\1/g);
-  if (!literals) return null; // 文字列リテラルが無い行はキーワード単独では検知しない
-  const code = line.replace(/(["'`])(.*?)\1/g, '$1$1'); // リテラル本体を伏せる
+function keywordInCode(code) {
   const lower = code.toLowerCase();
   for (const ph of PHRASE_KEYWORDS) {
     if (lower.includes(ph)) return ph;
   }
   const words = new Set(splitToWords(code));
-  for (const kw of WORD_KEYWORDS) {
-    if (words.has(kw)) return kw;
+  return WORD_KEYWORDS.find(kw => words.has(kw)) || null;
+}
+
+function findKeyword(line, file) {
+  // dotenv / YAML の引用符なし scalar。環境変数参照と空値は秘密値ではない。
+  if (isEnvFile(file) || /\.(?:env|ya?ml)$/i.test(file || '')) {
+    const assignment = line.match(/^(?:(?:#|\/\/|\*)\s*)?(?:-\s*)?(?:export\s+)?([A-Za-z_][\w.-]*)\s*[:=]\s*(.+)$/);
+    if (assignment) {
+      const value = assignment[2].trim();
+      const keyword = keywordInCode(assignment[1]);
+      if (keyword) {
+        const reference = '(?:\\$[A-Za-z_][A-Za-z0-9_]*|\\$\\{[A-Za-z_][A-Za-z0-9_]*\\})';
+        if (/^#/.test(value) || /^(?:null|~)\s*(?:#.*)?$/i.test(value) ||
+            new RegExp(`^(?:${reference}|"${reference}")\\s*(?:#.*)?$`).test(value) ||
+            /^["'`]\s*["'`]\s*(?:#.*)?$/.test(value)) return null;
+        return keyword;
+      }
+    }
   }
-  return null;
+  const literals = line.match(/(["'`])(.*?)\1/g);
+  if (!literals) return null; // 文字列リテラルが無い行はキーワード単独では検知しない
+  // JSON / object の引用符付きキーは残し、値だけを伏せる。
+  const code = line.replace(/(["'`])(.*?)\1/g, (literal, quote, body, offset) =>
+    /^\s*:/.test(line.slice(offset + literal.length)) ? body : quote + quote);
+  return keywordInCode(code);
 }
 
 // 高エントロピー文字列 (APIキー等) の検知
@@ -110,10 +128,15 @@ function findHighEntropyLiteral(line) {
     const raw = lit.slice(1, -1);
     if (/\s/.test(raw)) continue;
     if (/[^\x20-\x7E]/.test(raw)) continue;
-    if (raw.length >= 16) {
-      const e = calculateEntropy(raw);
+    // shell の変数から導出したパスは静的な各パス要素を検査する。
+    // 変数名＋区切りのエントロピーで一括誤検知しない。
+    const candidates = /^\$(?:[A-Za-z_]\w*|\{[A-Za-z_]\w*\})\//.test(raw)
+      ? raw.split('/').slice(1) : [raw];
+    for (const candidate of candidates) {
+      if (candidate.length < 16) continue;
+      const e = calculateEntropy(candidate);
       if (e > 3.8) {
-        return `極めてランダムな文字列 (シークレットの疑い): "${raw.substring(0, 5)}..." (ランダム度 ${e.toFixed(2)})`;
+        return `極めてランダムな文字列 (シークレットの疑い): [redacted] (ランダム度 ${e.toFixed(2)})`;
       }
     }
   }
@@ -143,7 +166,7 @@ function findPii(line) {
   if (address) return `個人情報の可能性: 住所 ${maskPiiSample(address[0])}`;
 
   const labeled = line.match(PII_LABEL_PATTERN);
-  if (labeled) return `個人情報の可能性: ラベル付き個人情報 ${maskPiiSample(labeled[0])}`;
+  if (labeled) return '個人情報の可能性: ラベル付き個人情報 [value]';
 
   return null;
 }
@@ -170,7 +193,10 @@ function normalizePolicyPath(file) {
   let p = String(file);
   try {
     const resolved = path.resolve(file);
-    const rel = path.relative(process.cwd(), resolved);
+    const policyPath = getPromptPolicyPath();
+    const root = policyPath && path.basename(path.dirname(policyPath)) === '.yasakani'
+      ? path.dirname(path.dirname(policyPath)) : process.cwd();
+    const rel = path.relative(root, resolved);
     if (rel && !rel.startsWith('..') && !path.isAbsolute(rel)) p = rel;
   } catch (e) {
     // Keep the original path when resolution is not possible.
@@ -244,11 +270,15 @@ function getPromptPolicyPath() {
 
 function loadPromptPolicy() {
   const policyPath = getPromptPolicyPath();
-  let raw = null;
-  try { raw = policyPath ? JSON.parse(fs.readFileSync(policyPath, 'utf8')) : null; }
-  catch (e) { raw = null; }
-
-  if (!raw || typeof raw !== 'object') return DEFAULT_PROMPT_POLICY;
+  if (!policyPath) return DEFAULT_PROMPT_POLICY;
+  const raw = JSON.parse(fs.readFileSync(policyPath, 'utf8'));
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('Invalid prompt policy');
+  for (const key of ['public_notice', 'publicNotice', 'private_block', 'privateBlock', 'system_prompt_block', 'systemPromptBlock']) {
+    if (raw[key] !== undefined && (!Array.isArray(raw[key]) || raw[key].some(v => typeof v !== 'string' || !v.trim()))) throw new Error('Invalid prompt path rule');
+  }
+  for (const key of ['unknown_prompt', 'unknownPrompt']) {
+    if (raw[key] !== undefined && !['block', 'notice'].includes(raw[key])) throw new Error('Invalid prompt action');
+  }
   return {
     public_notice: arrayOrDefault(raw.public_notice || raw.publicNotice, DEFAULT_PROMPT_POLICY.public_notice),
     private_block: arrayOrDefault(raw.private_block || raw.privateBlock, DEFAULT_PROMPT_POLICY.private_block),
@@ -268,11 +298,9 @@ function findPromptInstructionReason(line, file) {
 
 function classifyPromptInstructionRisk(line, file) {
   const reason = findPromptInstructionReason(line, file);
-  if (!reason) return null;
-
   const policy = loadPromptPolicy();
   const displayPath = normalizePolicyPath(file) || '(unknown path)';
-  const base = `AI指示書/プロンプト断片の可能性: ${reason}`;
+  const base = `AI指示書/プロンプト断片の可能性: ${reason || '非公開・実運用 prompt の指定パス'}`;
 
   if (matchesAnyPolicyPath(file, policy.private_block)) {
     return {
@@ -281,18 +309,20 @@ function classifyPromptInstructionRisk(line, file) {
       message: `${base}。private prompt policy に一致 (${displayPath})。非公開前提のため commit 禁止です。`,
     };
   }
-  if (matchesAnyPolicyPath(file, policy.public_notice)) {
-    return {
-      action: 'notice',
-      category: 'public',
-      message: `${base}。public prompt policy に一致 (${displayPath})。公開サンプル扱いのため通知のみです。秘密情報・内部制約・実運用 tool schema が残っていないか確認してください。`,
-    };
-  }
   if (matchesAnyPolicyPath(file, policy.system_prompt_block)) {
     return {
       action: 'block',
       category: 'system-prompt',
       message: `${base}。*.system-prompt.md policy に一致 (${displayPath})。実プロンプトの可能性が高いため強警告です。`,
+    };
+  }
+
+  if (!reason) return null;
+  if (matchesAnyPolicyPath(file, policy.public_notice)) {
+    return {
+      action: 'notice',
+      category: 'public',
+      message: `${base}。public prompt policy に一致 (${displayPath})。公開サンプル扱いのため通知のみです。秘密情報・内部制約・実運用 tool schema が残っていないか確認してください。`,
     };
   }
 
@@ -307,14 +337,6 @@ function classifyPromptInstructionRisk(line, file) {
 function findPromptInstructionRisk(line, file) {
   const classified = classifyPromptInstructionRisk(line, file);
   return classified ? classified.message : null;
-}
-
-function isSkippableLine(s) {
-  return !s || s.startsWith('//') || s.startsWith('*') || s.startsWith('#');
-}
-
-function shouldSkipLine(s, file) {
-  return isSkippableLine(s) && !isMarkdownFile(file);
 }
 
 // 警告を出力して exit 1。クリーン時はこの関数を呼ばず、サイレントに exit 0 する。
@@ -335,114 +357,150 @@ function notice(reason) {
   console.log('   -> checkmaga での監査、または AI への相談を推奨します。');
 }
 
-// Git 差分スキャン。git が使えない場合のみ false を返す (それ以外は process.exit で終了)。
-function runGitDiffScan() {
-  let diffText = '';
-  try {
-    diffText = execSync('git diff --cached', { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'] }).trim();
-    if (!diffText) {
-      diffText = execSync('git diff', { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'] }).trim();
-    }
-  } catch (err) {
-    return false; // git 非対応 -> 呼び出し元でファイル監視へ
-  }
-  if (!diffText) process.exit(0); // 差分ゼロ -> サイレント
+const MAX_BYTES = 20 * 1024 * 1024;
+const LOCKFILES = ['package-lock.json', 'yarn.lock', 'pnpm-lock.yaml'];
 
-  // 監査推奨ファイルの種別検知 (通知のみ・コミットはブロックしない)
-  if (/(package\.json|package-lock\.json|yarn\.lock|pnpm-lock\.yaml)/.test(diffText)) {
-    notice('依存関係ファイル (package.json / lockfile) の変更を検知 — サプライチェーン監査を推奨。');
+// CLI と fixture 評価の共通検知経路。通知があっても同じ行の秘密値を検査する。
+function detectContent(content, file) {
+  const findings = [];
+  const pathRisk = classifyPromptInstructionRisk('', file);
+  if (pathRisk) return [{ ...pathRisk, rule: 'prompt', line: 0, detail: pathRisk.message }];
+  if (LOCKFILES.includes(path.basename(file))) return findings;
+  const lines = content.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    const prompt = classifyPromptInstructionRisk(line, file);
+    if (prompt) findings.push({ ...prompt, rule: 'prompt', line: i + 1, detail: prompt.message });
+    const pii = findPii(line);
+    const keyword = findKeyword(line, file);
+    const entropy = isMarkdownFile(file) ? null : findHighEntropyLiteral(line);
+    const detail = pii || (keyword ? `キーワード "${keyword}" と秘密値らしき値を検知。` : entropy);
+    if (detail) findings.push({ action: 'block', rule: pii ? 'pii' : keyword ? 'keyword' : 'entropy', line: i + 1, detail });
   }
-  if (/^\+\+\+ .*Dockerfile/m.test(diffText) || /^\+\+\+ .*(docker-)?compose\.ya?ml/m.test(diffText)) {
-    notice('Dockerfile / compose の変更を検知 — コンテナ監査 (NIST SP 800-190) を推奨。');
-  }
-  if (/^\+\+\+ .*\.github[/\\]workflows[/\\]/m.test(diffText)) {
-    notice('CI/CD ワークフロー定義の変更を検知 — パイプライン完全性の確認を推奨。');
-  }
-
-  // 追加行のスキャン。+++ ヘッダで対象ファイルを追跡し、ロックファイル
-  // (整合性ハッシュが高エントロピー誤検知の元) は行スキャンの対象外とする。
-  let currentFile = '';
-  for (const line of diffText.split('\n')) {
-    if (line.startsWith('+++ ')) {
-      currentFile = line.slice(4).replace(/^b\//, '');
-      continue;
-    }
-    if (!line.startsWith('+') || line.startsWith('+++')) continue;
-    if (/(package-lock\.json|yarn\.lock|pnpm-lock\.yaml)$/.test(currentFile)) continue;
-    const clean = line.substring(1).trim();
-    if (shouldSkipLine(clean, currentFile)) continue;
-    const promptRisk = classifyPromptInstructionRisk(clean, currentFile);
-    if (promptRisk && promptRisk.action === 'notice') notice(`${promptRisk.message} (Markdown 指示書/プロンプト監査)。`);
-    else if (promptRisk) warn(`${promptRisk.message} (Markdown 指示書/プロンプト監査)。`);
-    const pii = findPii(clean);
-    if (pii) warn(`${pii} (Git への個人情報混入防止)。`);
-    const kw = findKeyword(clean);
-    if (kw) warn(`セキュリティキーワード "${kw}" と文字列リテラルの同居を検知 (ハードコードされた秘密情報の疑い)。`);
-    const ent = isMarkdownFile(currentFile) ? null : findHighEntropyLiteral(clean);
-    if (ent) warn(ent);
-  }
-  process.exit(0); // クリーン -> サイレント
+  return findings;
 }
 
-// Git 非対応環境向けのファイル監視スキャン
-function runFileScan(args) {
-  let files = [];
-  if (args.length > 0) {
-    files = args.filter(f => {
-      try { return isScannableFile(f) && fs.statSync(f).isFile(); }
-      catch (e) { return false; }
-    });
-  } else {
-    const now = Date.now();
-    const walk = (dir) => {
-      let list;
-      try { list = fs.readdirSync(dir); } catch (e) { return; }
-      for (const name of list) {
-        if (SKIP_DIRS.includes(name)) continue;
-        const full = path.join(dir, name);
-        let st;
-        try { st = fs.statSync(full); } catch (e) { continue; }
-        if (st.isDirectory()) walk(full);
-        else if (isScannableFile(full) && now - st.mtimeMs < 300000) files.push(full);
-      }
-    };
-    walk(process.cwd());
-  }
-  if (files.length === 0) process.exit(0);
+function scanError(reason) {
+  console.error(`[Yasakani Jewel] 検査を完了できません: ${reason}`);
+  process.exit(2);
+}
 
-  for (const file of files) {
-    let content;
-    try { content = fs.readFileSync(file, 'utf-8'); } catch (e) { continue; }
-    const base = path.basename(file);
-    if (['package.json', 'package-lock.json', 'pnpm-lock.yaml'].includes(base)) {
-      notice(`依存関係ファイル "${base}" の変更を検知 — サプライチェーン監査を推奨。`);
-      continue; // ロックファイルの整合性ハッシュを誤検知しないよう行スキャンは省略
+function gitRead(args, cwd, encoding = 'utf8') {
+  return execFileSync('git', args, { cwd, encoding, maxBuffer: MAX_BYTES, stdio: ['ignore', 'pipe', 'pipe'] });
+}
+
+function inspectBuffer(buffer, file, mode) {
+  const pathRisk = classifyPromptInstructionRisk('', file);
+  if (pathRisk) warn(pathRisk.message, mode);
+  const base = path.basename(file);
+  if (base === 'package.json' || LOCKFILES.includes(base)) notice(`依存関係ファイル ${JSON.stringify(file)} — サプライチェーン監査を推奨。`);
+  if (base === 'Dockerfile' || /^(?:docker-)?compose\.ya?ml$/i.test(base)) notice(`コンテナ定義 ${JSON.stringify(file)} — コンテナ監査を推奨。`);
+  if (file.replace(/\\/g, '/').includes('.github/workflows/')) notice(`CI 定義 ${JSON.stringify(file)} — パイプライン監査を推奨。`);
+  // UTF-16 BOM のテキストも検査。その他の binary はソース拡張子なら検査失敗とする。
+  let content;
+  if (buffer[0] === 0xff && buffer[1] === 0xfe) content = buffer.subarray(2).toString('utf16le');
+  else if (buffer[0] === 0xfe && buffer[1] === 0xff) {
+    const swapped = Buffer.from(buffer.subarray(2));
+    if (swapped.length % 2) scanError('UTF-16 テキストを解釈できません。');
+    content = swapped.swap16().toString('utf16le');
+  } else if (buffer.includes(0)) {
+    if (isScannableFile(file)) scanError(`テキストとして検査できません: ${JSON.stringify(file)}`);
+    return;
+  } else content = buffer.toString('utf8');
+  for (const finding of detectContent(content, file)) {
+    const detail = `${JSON.stringify(file)} ${finding.line} 行目: ${finding.detail}`;
+    if (finding.action === 'notice') notice(detail);
+    else warn(detail, mode);
+  }
+}
+
+function scanFile(file) {
+  const stat = fs.lstatSync(file);
+  if (stat.isSymbolicLink()) scanError(`シンボリックリンクは検査できません: ${JSON.stringify(file)}`);
+  if (!stat.isFile()) scanError(`ファイルではありません: ${JSON.stringify(file)}`);
+  if (stat.size > MAX_BYTES) scanError(`20 MiB を超えるファイル: ${JSON.stringify(file)}`);
+  inspectBuffer(fs.readFileSync(file), file, 'ファイル');
+}
+
+function runAllScan(targets) {
+  const walk = file => {
+    const stat = fs.lstatSync(file);
+    if (stat.isSymbolicLink()) scanError(`シンボリックリンクは検査できません: ${JSON.stringify(file)}`);
+    if (stat.isDirectory()) {
+      for (const name of fs.readdirSync(file).sort()) {
+        if (!SKIP_DIRS.includes(name)) walk(path.join(file, name));
+      }
+    } else scanFile(file);
+  };
+  for (const target of targets.length ? targets : [process.cwd()]) walk(path.resolve(target));
+}
+
+function runGitScan(stagedOnly) {
+  let root;
+  try { root = gitRead(['rev-parse', '--show-toplevel'], process.cwd()).trim(); }
+  catch (e) {
+    if (stagedOnly) scanError('Git リポジトリを確認できません。');
+    return runAllScan([]);
+  }
+  const staged = gitRead(['diff', '--cached', '--name-only', '-z', '--diff-filter=ACMRTU', '--no-renames', '--'], root).split('\0').filter(Boolean);
+  if (stagedOnly || staged.length) {
+    for (const file of staged) {
+      const entry = gitRead(['ls-files', '--stage', '-z', '--', file], root).split('\0')[0];
+      if (!entry.startsWith('100')) scanError(`通常ファイル以外の index entry: ${JSON.stringify(file)}`);
+      inspectBuffer(gitRead(['show', `:${file}`], root, null), path.join(root, file), 'ステージ');
     }
-    const lines = content.split('\n');
-    for (let i = 0; i < lines.length; i++) {
-      const clean = lines[i].trim();
-      if (shouldSkipLine(clean, file)) continue;
-      const promptRisk = classifyPromptInstructionRisk(clean, file);
-      if (promptRisk && promptRisk.action === 'notice') notice(`ファイル "${base}" ${i + 1} 行目: ${promptRisk.message} (Markdown 指示書/プロンプト監査)。`);
-      else if (promptRisk) warn(`ファイル "${base}" ${i + 1} 行目: ${promptRisk.message} (Markdown 指示書/プロンプト監査)。`, 'Gitなしモード');
-      const pii = findPii(clean);
-      if (pii) warn(`ファイル "${base}" ${i + 1} 行目: ${pii} (Git への個人情報混入防止)。`, 'Gitなしモード');
-      const kw = findKeyword(clean);
-      if (kw) warn(`ファイル "${base}" ${i + 1} 行目: キーワード "${kw}" と文字列リテラルの同居を検知。`, 'Gitなしモード');
-      const ent = isMarkdownFile(file) ? null : findHighEntropyLiteral(clean);
-      if (ent) warn(`ファイル "${base}" ${i + 1} 行目: ${ent}`, 'Gitなしモード');
+  } else {
+    const changed = gitRead(['diff', '--name-only', '-z', '--diff-filter=ACMRTU', '--no-renames', '--'], root);
+    const untracked = gitRead(['ls-files', '--others', '--exclude-standard', '-z'], root);
+    for (const file of new Set((changed + untracked).split('\0').filter(Boolean))) scanFile(path.join(root, file));
+  }
+}
+
+function runHistoryScan() {
+  const root = gitRead(['rev-parse', '--show-toplevel'], process.cwd()).trim();
+  if (gitRead(['rev-parse', '--is-shallow-repository'], root).trim() === 'true') scanError('shallow clone では全履歴を検査できません。fetch-depth: 0 が必要です。');
+  const commits = gitRead(['rev-list', '--all'], root).trim().split('\n').filter(Boolean);
+  const seen = new Set();
+  for (const commit of commits) {
+    const entries = gitRead(['ls-tree', '-r', '-z', '--full-tree', commit], root).split('\0').filter(Boolean);
+    for (const entry of entries) {
+      const tab = entry.indexOf('\t');
+      const [mode, type, oid] = entry.slice(0, tab).split(' ');
+      const file = path.join(root, entry.slice(tab + 1));
+      const pathRisk = classifyPromptInstructionRisk('', file);
+      if (pathRisk) warn(pathRisk.message, '履歴');
+      if (type !== 'blob') continue; // submodule の履歴は別リポジトリ
+      if (mode !== '100644' && mode !== '100755') scanError('履歴に通常ファイル以外の blob があります。');
+      // 内容とパス分類を両方保持。同じ blob の別パスで分類を失わない。
+      const key = `${oid}:${file}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      inspectBuffer(gitRead(['cat-file', 'blob', oid], root, null), file, '履歴');
     }
   }
-  process.exit(0); // クリーン -> サイレント
 }
 
 function run(args) {
   args = args || process.argv.slice(2);
-  if (args.length > 0) runFileScan(args);
-  const usedGit = runGitDiffScan();
-  if (usedGit === false) runFileScan(args);
+  try {
+    if (args[0] === '--all') {
+      if (args.slice(1).some(arg => arg.startsWith('--'))) scanError('不明なオプションです。');
+      runAllScan(args.slice(1));
+    } else if (args[0] === '--history' || args[0] === '--staged') {
+      if (args.length !== 1) scanError('このモードはファイル指定と併用できません。');
+      if (args[0] === '--history') runHistoryScan();
+      else runGitScan(true);
+    } else if (args.length) {
+      if (args.some(arg => arg.startsWith('--'))) scanError('不明なオプションです。');
+      args.forEach(scanFile);
+    } else runGitScan(false);
+  } catch (e) {
+    // Git / FS の生エラーには対象の内容が混ざり得るため出力しない。
+    scanError('Git またはファイルの読み取りに失敗しました。');
+  }
 }
 
-module.exports = { run, findKeyword, findPii, findPromptInstructionRisk, classifyPromptInstructionRisk, findHighEntropyLiteral, splitToWords, calculateEntropy, isScannableFile, findPromptPolicyPath, getPromptPolicyPath };
+module.exports = { run, detectContent, findKeyword, findPii, findPromptInstructionRisk, classifyPromptInstructionRisk, findHighEntropyLiteral, splitToWords, calculateEntropy, isScannableFile, findPromptPolicyPath, getPromptPolicyPath };
 
 if (require.main === module) run();

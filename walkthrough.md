@@ -10,7 +10,7 @@ Yasakani Jewel（npm CLI 配布版）の完成時点における成果物の一�
 
 ### 1.1 npm パッケージ `yasakani-jewel`
 
-ゼロ依存・Node.js 16+ で動作する `yasakani-jewel` パッケージ。リポジトリルートが直接 npm パッケージとなっており、`npx github:rartaty/Yasakani-Jewel-master init` でそのまま利用できる（npm 公開後は `npx yasakani-jewel init` の **1 コマンド**）。
+ゼロ依存・Node.js 16+ で動作する `yasakani-jewel` パッケージ。リポジトリルートが直接 npm パッケージとなっており、`npx github:rartaty/yasakani-jewel-personal init` でそのまま利用できる（npm 公開後は `npx yasakani-jewel init` の **1 コマンド**）。
 
 | ファイル | 内容 |
 | :--- | :--- |
@@ -33,7 +33,6 @@ Yasakani Jewel（npm CLI 配布版）の完成時点における成果物の一�
 | [README.md](README.md) | プロジェクト README（クイックスタート・コマンド・防御範囲） |
 | [yasakani_jewel_specification.md](yasakani_jewel_specification.md) | システム仕様書（配布方式・3次元ポリシー・9項目の Gap Defenses） |
 | [yasakani_jewel_capabilities.md](yasakani_jewel_capabilities.md) | 防衛能力定義書（防げること／できること） |
-| [yasakani_jewel_adr.md](yasakani_jewel_adr.md) | ADR-001〜006（ハイブリッド設計／npm CLI 配布／2段階重大度 ほか） |
 | [yasakani_jewel_user_manual.md](yasakani_jewel_user_manual.md) | 究極の取扱説明書 |
 | [implementation_plan.md](implementation_plan.md) | 実装計画書 |
 | [task.md](task.md) | 完了タスクリスト |

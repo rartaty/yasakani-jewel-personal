@@ -1,0 +1,37 @@
+# Yasakani Jewel: init --ci で生成。scanner / policy は生成時のスナップショット。
+name: Yasakani security
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  security-scan:
+    name: Yasakani security scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@2951748f4c016b747952f8ca7e75fc64f2f62b53 # v6
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - name: Restore reviewed scanner outside the target repository
+        env:
+          YASAKANI_SCANNER_B64: __SCANNER_BASE64__
+          YASAKANI_SCANNER_SHA256: __SCANNER_SHA256__
+        run: |
+          node -e 'const fs = require("fs"), path = require("path"), crypto = require("crypto"); const source = Buffer.from(process.env.YASAKANI_SCANNER_B64, "base64"); if (crypto.createHash("sha256").update(source).digest("hex") !== process.env.YASAKANI_SCANNER_SHA256) throw new Error("Scanner snapshot mismatch"); const dir = fs.mkdtempSync(path.join(process.env.RUNNER_TEMP, "yasakani-")); const scanner = path.join(dir, "scan.js"); fs.writeFileSync(scanner, source, {flag: "wx"}); fs.appendFileSync(process.env.GITHUB_ENV, "YASAKANI_SCANNER=" + scanner + "\n");'
+      - name: Apply reviewed prompt policy
+        env:
+          YASAKANI_POLICY_B64: __PROMPT_POLICY_BASE64__
+        run: |
+          node -e 'const fs = require("fs"); const safe = (p, dir) => { try { const s = fs.lstatSync(p); if (s.isSymbolicLink() || !(dir ? s.isDirectory() : s.isFile())) throw new Error("Unsafe policy path"); } catch (e) { if (e.code !== "ENOENT") throw e; } }; safe(".yasakani", true); fs.mkdirSync(".yasakani", {recursive: true}); safe(".yasakani/prompt-policy.json", false); fs.writeFileSync(".yasakani/prompt-policy.json", Buffer.from(process.env.YASAKANI_POLICY_B64, "base64"));'
+      - name: Scan all target files
+        run: node "$YASAKANI_SCANNER" --all

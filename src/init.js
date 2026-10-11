@@ -15,10 +15,11 @@
 const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
+const { createHash } = require('crypto');
 const { stripJsonComments } = require('./jsonc');
+const { resolveHookPath, mergeHook } = require('./git-hooks');
 
 const MARKER_START = '<!-- >>> YASAKANI JEWEL v1';
-const HOOK_MARKER = '# >>> YASAKANI JEWEL v1 (pre-commit) >>>';
 
 const PKG_ROOT = path.join(__dirname, '..');
 const TEMPLATES = path.join(PKG_ROOT, 'templates');
@@ -141,27 +142,47 @@ function wireAiConfigs(root) {
 // --- 層B: git pre-commit フック ---
 function wireGitHook(root) {
   console.log('[層B] git pre-commit フック');
-  let isGit = false;
-  try { isGit = fs.statSync(path.join(root, '.git')).isDirectory(); }
-  catch (e) { isGit = false; }
-  if (!isGit) {
+  let hookPath;
+  try { hookPath = resolveHookPath(root); }
+  catch (e) { console.log(`  [警告] ${e.message}`); return false; }
+  if (!hookPath) {
     console.log('  [スキップ] git リポジトリではありません (層A/C/手動でカバー)');
-    return;
+    return true;
   }
   const tpl = readSafe(path.join(TEMPLATES, 'pre-commit')).replace(/\r\n/g, '\n');
-  const hookPath = path.join(root, '.git', 'hooks', 'pre-commit');
   const existing = readSafe(hookPath);
-  if (existing === null) {
-    writeSafe(hookPath, tpl);
-    console.log('  [新規作成] .git/hooks/pre-commit');
-  } else if (existing.includes(HOOK_MARKER)) {
-    console.log('  [配線済み] .git/hooks/pre-commit');
-  } else {
-    const appendBody = tpl.split('\n').filter(l => l !== '#!/bin/sh').join('\n');
-    writeSafe(hookPath, existing.replace(/\s+$/, '') + '\n\n' + appendBody);
-    console.log('  [追記]     .git/hooks/pre-commit (既存フックは保持)');
+  let merged;
+  try { merged = mergeHook(existing, tpl); }
+  catch (e) { console.log(`  [警告] ${e.message}`); return false; }
+  if (merged !== existing) {
+    writeSafe(hookPath, merged);
+    console.log(`  [更新] ${hookPath} (既存フックの前に検査)`);
   }
-  try { fs.chmodSync(hookPath, 0o755); } catch (e) { /* Windows 等では無視 */ }
+  fs.chmodSync(hookPath, 0o755);
+  return true;
+}
+
+function wireCi(root) {
+  console.log('[層E] GitHub Actions セキュリティ検査');
+  const target = path.join(root, '.github', 'workflows', 'yasakani-security.yml');
+  const template = readSafe(path.join(TEMPLATES, 'security-scan.yml'));
+  const policy = readSafe(path.join(root, '.yasakani', 'prompt-policy.json'));
+  JSON.parse(policy); // 不正 policy で生成しない
+  // 配布元が private でも導入先の token を要求せず実行できる。
+  const scanner = fs.readFileSync(path.join(PKG_ROOT, 'src', 'scan.js'));
+  const workflow = template
+    .replace('__PROMPT_POLICY_BASE64__', Buffer.from(policy).toString('base64'))
+    .replace('__SCANNER_BASE64__', scanner.toString('base64'))
+    .replace('__SCANNER_SHA256__', createHash('sha256').update(scanner).digest('hex'));
+  const existing = readSafe(target);
+  if (existing !== null && existing !== workflow) {
+    console.log('  [警告] 既存の yasakani-security.yml は保持しました。policy と固定検査器の更新を確認してください。');
+    return false;
+  }
+  if (existing === null) writeSafe(target, workflow);
+  console.log(`  [配線] ${target}`);
+  console.log('  GitHub の ruleset / branch protection で Yasakani security scan を必須チェックに設定してください。');
+  return true;
 }
 
 // --- 層C: VS Code / Cursor 保存時スキャン ---
@@ -270,18 +291,23 @@ function installRunOnSaveExtension() {
   }
 }
 
-function run() {
+function run(args = []) {
+  if (args.some(arg => arg !== '--ci') || args.length > 1) throw new Error('init のオプションは --ci のみです。');
   const root = process.cwd();
   console.log('\n🔮 Yasakani Jewel - init');
   console.log(`対象プロジェクト: ${root}\n`);
 
   placeYasakaniDir(root);
   wireAiConfigs(root);
-  wireGitHook(root);
+  const hooked = wireGitHook(root);
   wireVscode(root);
+  const ci = args.includes('--ci') ? wireCi(root) : true;
 
-  console.log('\n✅ 配線完了。AI ツールを再起動すると有効になります。');
+  if (!hooked || !ci) {
+    console.log('\n⚠️ 配線が一部未完了です。上記の警告を確認してください。');
+    process.exitCode = 2;
+  } else console.log('\n✅ 配線完了。AI ツールを再起動すると有効になります。');
   console.log('   AI チャットで「checkmaga」と入力すると監査が起動します。\n');
 }
 
-module.exports = { run, hasYasakaniRunOnSave, hasCurrentYasakaniRunOnSave, mergeRunOnSave, findEditorCli };
+module.exports = { run, wireGitHook, wireCi, hasYasakaniRunOnSave, hasCurrentYasakaniRunOnSave, mergeRunOnSave, findEditorCli };

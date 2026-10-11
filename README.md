@@ -20,7 +20,6 @@
 | **第三者検証時の共有ルール** |  本書 [§🔐 第三者検証時の共有ルール](#-第三者検証時の共有ルール) ／ [取扱説明書 §6](yasakani_jewel_user_manual.md)  |
 | **何を防げるか・できるか** | [防衛能力定義書 (yasakani_jewel_capabilities.md)](yasakani_jewel_capabilities.md) |
 | **仕様詳細・3次元ポリシー・Gap Defenses** | [システム仕様書 (yasakani_jewel_specification.md)](yasakani_jewel_specification.md) |
-| **アーキ判断の経緯** | [ADR (yasakani_jewel_adr.md)](yasakani_jewel_adr.md) |
 | **変更履歴** | [CHANGELOG.md](CHANGELOG.md) |
 | **ライセンス** | [LICENSE](LICENSE) (MIT) |
 
@@ -33,7 +32,7 @@
 プロジェクトのルートディレクトリで、**1 コマンド**:
 
 ```sh
-npx yasakani-jewel init
+npx github:rartaty/yasakani-jewel-personal init
 ```
 
 手で配置・コピーするファイルはありません。`init` が以下の **4 層**を環境に応じて自動配線します。
@@ -41,9 +40,9 @@ npx yasakani-jewel init
 | 層 | トリガー | 内容 |
 | :--- | :--- | :--- |
 | A. AIチャット連携 | `checkmaga` 入力時 | `.yasakani/` 配置 + 各 AI 設定へポインタ追記 |
-| B. git pre-commit | `git commit` 時 | ステージ差分をプリスキャン（git リポジトリ時）|
+| B. git pre-commit | `git commit` 時 | ステージされたファイルの全内容を検査（git リポジトリ時）|
 | C. 保存時スキャン | ファイル保存（Ctrl+S）| VS Code / Cursor の Run on Save 連携 |
-| D. 手動 | `npx yasakani-jewel scan` | いつでも実行可能 |
+| D. 手動 | `npx github:rartaty/yasakani-jewel-personal scan` | いつでも実行可能 |
 
 **必要環境**: Node.js 16 以上のみ（Windows / Mac / Linux 共通。`.bat` / PowerShell 不要）。
 
@@ -54,11 +53,26 @@ npx yasakani-jewel init
 CLI:
 
 ```sh
-npx yasakani-jewel init        # 監査レイヤーを配線
-npx yasakani-jewel scan        # 手動スキャン（git 差分 / 指定ファイル）
-npx yasakani-jewel scan path/to/file.md  # Markdown 指示書・プロンプト断片も確認
-npx yasakani-jewel uninstall   # 配線を除去（ユーザー記述は保持）
+npx github:rartaty/yasakani-jewel-personal init        # 監査レイヤーを配線
+npx github:rartaty/yasakani-jewel-personal init --ci   # GitHub Actions の全体検査も生成
+npx github:rartaty/yasakani-jewel-personal scan        # ステージ内容、または変更・未追跡ファイル
+npx github:rartaty/yasakani-jewel-personal scan path/to/file.md  # Markdown 指示書・プロンプト断片も確認
+npx github:rartaty/yasakani-jewel-personal scan --all  # 既存・未追跡・gitignore対象も検査
+npx github:rartaty/yasakani-jewel-personal scan --all src config  # 指定した範囲を全体検査
+npx github:rartaty/yasakani-jewel-personal scan --history  # ローカルGitの全reachable履歴を検査
+npx github:rartaty/yasakani-jewel-personal scan --staged   # ステージ内容のみ（フック用）
+npx github:rartaty/yasakani-jewel-personal audit logs events.jsonl  # 外部ログを一度だけ点検
+npx github:rartaty/yasakani-jewel-personal audit logs events.jsonl --profile profile.json --json
+npx github:rartaty/yasakani-jewel-personal uninstall   # 配線を除去（ユーザー記述は保持）
 ```
+
+`init --ci` は `.github/workflows/yasakani-security.yml` を生成します。GitHub の ruleset / branch protection で **Yasakani security scan** を必須チェックに設定してください。既存の workflow が異なる場合は保持し、exit 2 で更新確認を促します。CI は生成時のスキャナを base64 snapshot と SHA-256 で workflow に保持し、runner の一時ディレクトリへ復元して `--all` で検査します。配布元リポジトリの公開・認証は不要で、対象の npm scripts は実行しません。scanner / policy を変更するときは workflow 内の `YASAKANI_SCANNER_B64` / `YASAKANI_SCANNER_SHA256` / `YASAKANI_POLICY_B64` もレビューしてください。base64 は暗号化ではなく、SHA-256 は snapshot の整合性確認です。workflow の変更権限とレビューも管理してください。
+
+フックは worktree とプロジェクト内 `core.hooksPath` に対応し、既存 shell フックの先頭で検査します。外部共有パス・外部へのリンク・非 shell フックは自動変更せず、配線未完了を通知します。ローカルフックの回避に備え、CI の必須チェックも併用してください。`uninstall` は既存フックのユーザー部分と CI workflow を保持します。
+
+`--all` は更新時刻・拡張子に依存せずテキストを検査し、`.git` / `node_modules` / `.yasakani` はディレクトリ探索から除きます。バイナリ資産と lockfile の本文は対象外です。`--history` はローカルにある全参照の到達可能な commit を調べます。未取得のリモート履歴・reflog・submodule の別リポジトリは対象外で、shallow clone はエラーになります。履歴から消した秘密値も残存 commit から検知できるため、漏洩時は値の失効・再発行が必要です。
+
+終了コードは `0` = ブロック対象なし、`1` = 懸念あり、`2` = 検査失敗です。読めないファイル・シンボリックリンク・20 MiB 超のファイルを黙って成功扱いにはしません。`--staged` は index の内容を検査し、ステージが空でも作業ツリーへ切り替えません。公開 prompt の通知が出ても、同じファイルの秘密情報・PII は別途ブロックします。
 
 AI への指示を含む Markdown を検知した場合、Yasakani Jewel はファイルの保存場所と名前から、警告の強さと Git commit の可否を決めます。
 prompts/public/** に一致したファイルは「公開用サンプル」として扱い、通知は出しますが commit は止めません。
@@ -75,6 +89,10 @@ AI チャット（Claude Code / Cursor / Copilot）:
 
 検出されたリスクは `risktaskboard.md` に監査証跡として蓄積されます。
 
+`audit logs` は指定したローカルの UTF-8 JSON Lines を点検し、ログイン失敗の集中、大量取得・外部転送、アカウント作成・再有効化・権限変更を非ブロックの調査候補として出力します。常駐・外部通信・遮断・自動失効は行いません。生ログ、主体、IP、URL、秘密値は結果に出力せず、行番号・UTC 日時・件数から元ログを調べられます。結果は Markdown、`--json` で JSON。`--output` は存在しないファイルにだけ保存し、親ディレクトリは事前に作成してください。ログ点検はリスク管理ボードを自動変更しません。
+
+終了コードは `0` = 提供ログの対応ルールで候補なし、`1` = 調査候補あり、`2` = 検査失敗。空ログ・未知 event・必須項目欠落・部分解析・期間内ログなしを成功扱いしません。実環境は未確認と表示し、該当ログのないルールは未検証にします。対応する入力形式と profile は [取扱説明書の外部ログ点検](yasakani_jewel_user_manual.md#8-外部ログのオンデマンド点検) を参照してください。
+
 ---
 
 ## 🛡️ 主な防御範囲
@@ -85,11 +103,17 @@ AI チャット（Claude Code / Cursor / Copilot）:
 
 ---
 
+スキャナは AI を自動起動しません。意味論的監査は AI チャットで `checkmaga` を実行して行います。prompt injection 対策の指示書は監査を補助しますが、AI の追従や攻撃防止を保証する実行時の強制機構はありません。このリポジトリ自身の CI では fixture 評価と Gitleaks の履歴検査も行います（導入先に生成する workflow は Yasakani の全体検査）。
+
+---
+
 ## 📊 品質測定と低信頼 Finding
+
+検査項目は結果と確認範囲を別々に記録します。「設定コードを確認済み」「実環境も確認済み」「実環境は未確認」を、確認日時・対象・根拠とともに明示します。IaC や取り込んだ過去ログだけでは現在の実環境を確認済みにしません。共通 Finding の `verification.code` / `verification.runtime` は、証跡のない入力を未確認として扱います。
 
 開発用に `npm run eval` を用意しています。`test/fixtures/` の true-positive / false-positive 集合に対して、blocking の TP / TN / FP / FN と FP率 / FN率、notice の非ブロックFPを分けて出力します。
 
-低信頼 Finding は破棄せず、`checkmaga` レポートの「調査候補（低信頼・非ブロック）」へ隔離して残す方針です。PRコメント・外部APIフィルタリング・複雑な除外設定は、初期版では入れません。理由とトレードオフは [ADR-007](yasakani_jewel_adr.md) に記録しています。
+低信頼 Finding は破棄せず、`checkmaga` レポートの「調査候補（低信頼・非ブロック）」へ隔離して残す方針です。PRコメント・外部APIフィルタリング・複雑な除外設定は、初期版では入れません。
 
 `checkmaga` レポートでは、同じリスクが複数セクションに出る場合があります。これは、MECE 6 領域 / Gap Defenses / 対象ファイル / 未解決リスク / 修正Diff の各観点で「どこまで見たか」を残すための証跡設計です。確定根拠が弱いものは未解決リスクに混ぜず、調査候補として隔離して人間の確認対象として残します。
 
@@ -110,7 +134,6 @@ AI チャット（Claude Code / Cursor / Copilot）:
 | `bin/` / `src/` / `templates/` / `package.json` / `LICENSE` | npm パッケージ `yasakani-jewel`（配布物本体。リポジトリルートが直接パッケージ） |
 | [yasakani_jewel_specification.md](yasakani_jewel_specification.md) | システム仕様書 |
 | [yasakani_jewel_capabilities.md](yasakani_jewel_capabilities.md) | 防衛能力定義書 |
-| [yasakani_jewel_adr.md](yasakani_jewel_adr.md) | アーキテクチャ意思決定記録 |
 | [yasakani_jewel_user_manual.md](yasakani_jewel_user_manual.md) | 究極の取扱説明書（詳細マニュアル）|
 | `test-environment/` | 検証用の脆弱性テスト資産 |
 
@@ -128,10 +151,12 @@ AI チャット（Claude Code / Cursor / Copilot）:
 
 ## 📦 公開について
 
-このリポジトリ自体が npm パッケージ `yasakani-jewel` です。npm 公開前は **GitHub 経由で直接導入**できます:
+公開版には実装コード・合成テスト・利用文書を含めます。ADR、生成された監査レポート、生ログ、個人情報・機密情報は公開対象から除外します。テスト結果の要約と GitHub Actions の成否は公開します。
+
+この公開版は **GitHub 経由で直接導入**できます。今回の更新は GitHub 配布のみで、npm への publish は行っていません:
 
 ```sh
-npx github:rartaty/Yasakani-Jewel-master init
+npx github:rartaty/yasakani-jewel-personal init
 ```
 
 ---

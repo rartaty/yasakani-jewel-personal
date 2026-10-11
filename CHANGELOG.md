@@ -4,8 +4,20 @@
 
 ## [Unreleased]
 
+- 固定 SHA を電話番号・郵便番号と誤判定しないよう境界条件を修正。環境変数を含む実行時パスは静的な各要素の entropy を検査する。
+
 ### Added
 
+- 共通 Finding にコード／実環境の確認範囲を追加。証跡不足や取り込んだ過去ログを実環境確認済みにしない。
+- `audit logs` を追加。JSON Lines の一回点検、profile による形式対応、期間指定、Markdown／JSON 出力、新規ファイルへの保存に対応。
+- ログイン失敗の集中、大量取得・転送、アカウント・権限変更を調査候補として報告。生ログ・主体・IP・秘密値を出力せず、未検証と解析失敗を明示する。
+
+- 生成 CI の検査器を SHA-256 付き snapshot として埋め込み、配布元が非公開でも認証なしで実行可能にした。
+
+- `init --ci` による全体検査 workflow の生成、worktree / project hooksPath の配線、既存 shell フックより前の staged 検査を追加。検査器不在・配線未完了は失敗として扱う。
+- 自己 CI に fixture 評価と固定版 Gitleaks の履歴検査を追加。AI の自動起動・prompt injection 防止の保証について説明を実装に合わせた。
+
+- `scan --all [path...]`、`--history`、`--staged` を追加。index blob の全内容と NUL 区切りのファイル名を読み、古い ignored ファイル・除去後の履歴・作業ツリーとの差異を検証する CLI テストを追加。
 - **Git への個人情報混入防止（PII Leak Prevention）**
   - 決定論プリフィルターでメールアドレス、日本の電話番号、郵便番号、住所らしき文字列、ラベル付き個人情報（`氏名` / `名前` / `address` / `email` / `phone` 等）を検知
   - 検知時は秘密情報と同じくコミットを中断
@@ -44,6 +56,7 @@
 
 ### Changed
 
+- dotenv の引用符なし秘密値、JSON の秘密キー、コメント、package.json 内の秘密情報を検査。private / system prompt パスはマーカーの有無に関係なくブロックし、PII・秘密値の警告をマスク。
 - 仕様書 §6 / 取扱説明書 §4 を Markdown レポート出力仕様＋ OSI カバレッジ宣言に同期
 - 低信頼 Finding は confidence score で断定せず、誤検知可能性ラベル付きの調査候補としてローカルレポートに残す方針に変更
 
@@ -52,7 +65,7 @@
 ### Added
 
 - **npm CLI 配布** (`yasakani-jewel`) — プロジェクトルートで 1 コマンドで導入
-  - `npx github:rartaty/Yasakani-Jewel-master init`（GitHub 経由・npm 公開前）
+  - 現在の公開版の導入先: `npx github:rartaty/yasakani-jewel-personal init`（GitHub 経由）
   - `npx yasakani-jewel init`（npm 公開後）
 - **多層トリガー** A〜D
   - A. AIチャット連携（`CLAUDE.md` 等にポインタを追記）

@@ -21,25 +21,9 @@ function walk(dir) {
   return out.sort();
 }
 
-function detectLine(line, file) {
-  const promptRisk = scan.classifyPromptInstructionRisk(line, file);
-  if (promptRisk) return { rule: 'prompt', action: promptRisk.action, detail: promptRisk.message };
-  const pii = scan.findPii(line);
-  if (pii) return { rule: 'pii', detail: pii };
-  const keyword = scan.findKeyword(line);
-  if (keyword) return { rule: 'keyword', detail: keyword };
-  const entropy = path.extname(file).toLowerCase() === '.md' ? null : scan.findHighEntropyLiteral(line);
-  if (entropy) return { rule: 'entropy', detail: entropy };
-  return null;
-}
-
 function detectFile(file) {
-  const lines = fs.readFileSync(file, 'utf8').split(/\r?\n/);
-  for (let i = 0; i < lines.length; i++) {
-    const found = detectLine(lines[i].trim(), file);
-    if (found) return { ...found, line: i + 1 };
-  }
-  return null;
+  const findings = scan.detectContent(fs.readFileSync(file, 'utf8'), file);
+  return findings.find(finding => finding.action === 'block') || findings[0] || null;
 }
 
 const results = [];

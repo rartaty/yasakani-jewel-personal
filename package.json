@@ -16,7 +16,7 @@
     "node": ">=16"
   },
   "scripts": {
-    "test": "node test/scan.test.js && node test/findings.test.js && node test/init-uninstall.test.js",
+    "test": "node test/scan.test.js && node test/findings.test.js && node test/audit-logs.test.js && node test/scan-cli.test.js && node test/scan-modes.test.js && node test/hooks-ci.test.js && node test/init-uninstall.test.js",
     "eval": "node test/eval-fixtures.js"
   },
   "keywords": [

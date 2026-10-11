@@ -10,6 +10,7 @@
 const fs = require('fs');
 const path = require('path');
 const { stripJsonComments } = require('./jsonc');
+const { resolveHookPath } = require('./git-hooks');
 
 const MARKER_START = '<!-- >>> YASAKANI JEWEL v1';
 const MARKER_END = 'YASAKANI JEWEL v1 <<< -->';
@@ -77,8 +78,10 @@ function run() {
 
   // 層B: git pre-commit フック
   console.log('[層B] git pre-commit フック除去');
-  const hookPath = path.join(root, '.git', 'hooks', 'pre-commit');
-  const hook = readSafe(hookPath);
+  let hookPath;
+  try { hookPath = resolveHookPath(root); }
+  catch (e) { console.log(`  [警告] ${e.message}`); }
+  const hook = hookPath ? readSafe(hookPath) : null;
   if (hook !== null && hook.includes(HOOK_MARKER_START)) {
     const cleaned = removeBlock(hook, HOOK_MARKER_START, HOOK_MARKER_END);
     if (cleaned.trim() === '' || cleaned.trim() === '#!/bin/sh') {
@@ -119,7 +122,7 @@ function run() {
     console.log('  [削除] .yasakani/');
   } catch (e) { /* 無ければ無視 */ }
 
-  console.log('\n✅ アンインストール完了。risktaskboard.md は監査証跡として残しています。\n');
+  console.log('\n✅ アンインストール完了。risktaskboard.md と CI workflow は残しています。\n');
 }
 
 module.exports = { run, removeYasakaniRunOnSave, shouldKeepRunOnSave };

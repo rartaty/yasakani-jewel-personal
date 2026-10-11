@@ -16,3 +16,6 @@ Thumbs.db
 
 # 監査レポート (ローカル証跡のみ・git 管理対象外)
 checkmaga-reports/
+
+# 個人公開版では ADR を配布しない
+/yasakani_jewel_adr.md

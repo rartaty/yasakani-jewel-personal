@@ -60,7 +60,6 @@ Yasakani Jewel（npm CLI 配布版）の構築・検証タスクの全体像と�
 - [x] `README.md` — プロジェクト README（npm CLI 版に全面刷新）
 - [x] `yasakani_jewel_specification.md` — システム仕様書
 - [x] `yasakani_jewel_capabilities.md` — 防衛能力定義書
-- [x] `yasakani_jewel_adr.md` — アーキテクチャ意思決定記録（ADR-001〜007）
 - [x] `yasakani_jewel_user_manual.md` — 究極の取扱説明書
 - [x] `implementation_plan.md` — 実装計画書（本書と対になる）
 - [x] `walkthrough.md` — 検証結果報告書
@@ -93,17 +92,13 @@ Yasakani Jewel（npm CLI 配布版）の構築・検証タスクの全体像と�
 - [x] `cli/` サブディレクトリをリポジトリルートに平準化 (`npx github:` 対応)
 - [x] 免責事項を README.md に明示
 - [x] `package.json` の `author` 欄を記入 (`rartaty`)
-- [x] GitHub リポジトリへの初回 push (`rartaty/Yasakani-Jewel-master`)
+- [x] GitHub リポジトリへの初回 push
 
 ## ✅ 実プロジェクト dogfooding
 
-- [x] **2026-05-25**: `projectBigtester/` で初の `checkmaga` 実機監査を完走
-  - 対象: 短期銘柄選定・ハイブリッド取引ロジック 完全設計図（自動取引システム設計）
-  - ポリシー: PHASE=`design` / SIZE=`M` / ASSET=`financial` → **L3 最高強度**
-  - 結果: ❌ 重大欠陥 6 件 / ⚠️ 警告 7 件 / N/A 9 件 / ✅ 検査済 2 件
-  - レポート: `projectBigtester/checkmaga-reports/20260525T231151-checkmaga.md`（295 行）
-  - リスクボード: `projectBigtester/risktaskboard.md`（RTB-001〜RTB-013 登録）
-  - 確認: §7.1 テンプレート全 7 セクション（メタ情報 / MECE 6 領域 / Gap Defenses 9 項目 / 対象ファイル / 検出リスク / Before/After Diff / メタ詳細 / OSI カバレッジ）すべて生成
+- [x] **2026-05-25**: 別のローカルプロジェクトで `checkmaga` の監査フローを検証
+  - 公開版には対象プロジェクト名・設計内容・実際の監査結果・レポート保存先を含めない
+  - フローの検証は、現在の実環境の安全を証明するものではない
 
 ## 🚀 残タスク
 
@@ -113,7 +108,7 @@ Yasakani Jewel（npm CLI 配布版）の構築・検証タスクの全体像と�
 - [x] **P2: macOS/Linux CLI 検出修正** — `spawnSync('command', ['-v'])` 依存をやめ、PATH探索で `code` / `cursor` CLIを検出するよう修正（risktaskboard: YJ-TB-004）
 - [x] **P2: prompt policy の root 解決修正** — サブディレクトリ実行でも親方向探索で `.yasakani/prompt-policy.json` を拾う（risktaskboard: YJ-TB-005）
 - [x] **P3: eval 指標の表示改善** — `blocking FP` と `notice FP` を分けて出力する（risktaskboard: YJ-TB-006）
-- [ ] **フレンドのプロジェクトでの dogfooding** — projectBigtester で 1 回完走済み、フレンド案件はこれから。共有は第三者検証用ルールに従う
+- [ ] **フレンドのプロジェクトでの dogfooding** — 個人環境での検証を経て、第三者検証用ルールに従って進める
 - [ ] (後回し) PR への Finding 自動コメント — 公開範囲・通知ノイズ・権限/API リスクを整理してから
 - [ ] (後回し) 外部 API / Claude filtering — コード外部送信リスクを避けるため初期版では未導入
 - [ ] (後回し) 複雑な hard exclusion / confidence 設定 — 見逃しと設定複雑化のリスクがあるため、測定基盤を先に育てる

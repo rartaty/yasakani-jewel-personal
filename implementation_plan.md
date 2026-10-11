@@ -164,8 +164,8 @@ Yasakani Jewel の現行版（npm CLI 配布）の実装計画。
 | 1 | ローカル検証 | ✅ 完了 | `node bin/yasakani.js init` をスクラッチで実行・全層配線確認 |
 | 2 | `package.json` の `author` 記入 | ✅ 完了 | `"author": "rartaty"` |
 | 3 | LICENSE / CHANGELOG / CI / 単体テスト整備 | ✅ 完了 | `LICENSE` (MIT) / `CHANGELOG.md` / `.github/workflows/test.yml` / `test/scan.test.js` |
-| 4 | GitHub リポジトリへの push | ✅ 完了 | <https://github.com/rartaty/Yasakani-Jewel-master> |
-| 5 | GitHub 経由インストールの実機検証 | ✅ 完了 | `npx github:rartaty/Yasakani-Jewel-master init`（スクラッチで 7 秒完走） |
+| 4 | GitHub リポジトリへの push | ✅ 完了 | 公開版の導入先は [README.md](README.md) を参照 |
+| 5 | GitHub 経由インストールの実機検証 | ✅ 完了 | 初期版をスクラッチで検証。現在の公開版の導入コマンドは [README.md](README.md) を参照 |
 | 6 | **実プロジェクトでの価値検証（dogfooding）** | ⏳ 進行中 | フレンドのプロジェクトで運用 → フィードバック収集 |
 | 7 | （任意）npm 名前空き確認 → `npm publish` | ⏸ 保留 | public 配布が必要になった時点で実施 |
 | 8 | （任意）GitHub Actions の SHA pin | ⏸ 保留 | 指示書 §3.8 の自己適用 |

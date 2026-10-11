@@ -6,6 +6,8 @@ const {
   normalizeFinding,
   mergeFindings,
   formatFalsePositiveLikelihood,
+  normalizeVerification,
+  formatVerification,
 } = require('../src/findings');
 
 const normalized = normalizeFinding({
@@ -88,5 +90,29 @@ assert.strictEqual(
   formatFalsePositiveLikelihood(reportOnly[0].falsePositiveLikelihood),
   'high false-positive likelihood; report-only investigation candidate'
 );
+
+const codeReview = { status: 'verified', kind: 'config-review', scope: 'storage.tf',
+  checkedAt: '2026-10-11T00:00:00Z', evidence: ['public access disabled in configuration'] };
+const liveReview = { status: 'verified', kind: 'live-config', scope: 'staging storage',
+  checkedAt: '2026-10-11T01:00:00Z', evidence: ['read-only configuration query'] };
+assert.strictEqual(fallback.verification.runtime.status, 'unverified');
+assert.strictEqual(formatVerification({ code: codeReview }), '設定コードを確認済み／実環境は未確認');
+assert.strictEqual(formatVerification({ code: codeReview, runtime: liveReview }), '設定コードを確認済み／実環境も確認済み');
+assert.strictEqual(formatVerification({ runtime: liveReview }), '設定コードは未確認／実環境を確認済み');
+for (const patch of [{ kind: 'imported-log' }, { evidence: [] }, { scope: '' },
+  { checkedAt: '2026-02-31T00:00:00Z' }, { checkedAt: 'yesterday' }, { status: 'unverified' }]) {
+  assert.strictEqual(normalizeVerification({ runtime: { ...liveReview, ...patch } }).runtime.status, 'unverified');
+}
+const finding = { category: CATEGORIES.DATA_EXPOSURE, title: 'Storage access', location: 'storage.tf' };
+const observations = mergeFindings([
+  { ...finding, verification: { code: codeReview } },
+  { ...finding, verification: { runtime: liveReview } },
+]);
+assert.strictEqual(observations.length, 2, 'different evidence does not promote verification on merge');
+assert(observations.every(item => !(item.verification.code.status === 'verified' && item.verification.runtime.status === 'verified')));
+assert.strictEqual(mergeFindings([
+  { ...finding, verification: { code: codeReview } },
+  { ...finding, verification: { code: codeReview }, severity: 'high' },
+]).length, 1, 'identical scoped evidence still merges');
 
 console.log('findings tests passed');

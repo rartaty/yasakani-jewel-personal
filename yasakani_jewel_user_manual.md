@@ -6,7 +6,7 @@
 > この取扱説明書は、プロジェクトの一番上の階層、またはドキュメント管理フォルダに保管し、いつでも参照できるように手元に置いておいてください。
 
 > [!NOTE]
-> **本書はマニュアル本体です。** 目的別の文書案内（仕様書 / 防衛能力 / ADR / 第三者検証ルール）はプロジェクトの [README.md](README.md) §📚 にまとまっています。「何を防げるか」「アーキ判断の経緯」「変更履歴」を素早く知りたい場合は、まず README の目的別テーブルを参照してください。
+> **本書はマニュアル本体です。** 目的別の文書案内（仕様書 / 防衛能力 / 第三者検証ルール）はプロジェクトの [README.md](README.md) §📚 にまとまっています。「何を防げるか」「仕様」「変更履歴」を素早く知りたい場合は、まず README の目的別テーブルを参照してください。
 
 ---
 
@@ -89,8 +89,12 @@ flowchart TD
 Yasakani Jewel は npm パッケージとして配布されます。プロジェクトのルートディレクトリで、以下の **1 コマンド**を実行するだけで導入が完了します（手で配置・コピーするファイルはありません）。
 
 ```sh
-npx yasakani-jewel init
+npx github:rartaty/yasakani-jewel-personal init
 ```
+
+GitHub Actions で全体検査も行う場合は `npx github:rartaty/yasakani-jewel-personal init --ci` を実行します。生成された `.github/workflows/yasakani-security.yml` をレビューし、GitHub の ruleset / branch protection で **Yasakani security scan** を必須に設定してください。検査器は生成時の base64 snapshot と SHA-256 を workflow に含め、runner の一時ディレクトリで復元します。配布元が非公開でも認証なしで実行でき、対象リポジトリの npm scripts は実行しません。
+
+CI の policy は生成時の snapshot（`YASAKANI_POLICY_B64`）です。policy や検査器を更新するときは workflow 内の snapshot と hash もレビューしてください。base64 は暗号化ではなく、SHA-256 は整合性確認です。異なる既存 workflow は自動上書きしません。`uninstall` 後も CI workflow は残します。非公開リポジトリで必須チェック設定が利用できるかは GitHub の契約にも依存します。
 
 `init` が自動で配置・配線するもの:
 
@@ -108,7 +112,7 @@ npx yasakani-jewel init
 ```
 
 > [!NOTE]
-> 必要環境は **Node.js 16 以上**のみ（`npx` は Node に同梱）。`.bat` や PowerShell は不要で、Windows / Mac / Linux 共通で動作します。配線を除去したい場合は `npx yasakani-jewel uninstall` を実行してください。
+> 必要環境は **Node.js 16 以上**のみ（`npx` は Node に同梱）。`.bat` や PowerShell は不要で、Windows / Mac / Linux 共通で動作します。配線を除去したい場合は `npx github:rartaty/yasakani-jewel-personal uninstall` を実行してください。
 
 ---
 
@@ -117,7 +121,7 @@ npx yasakani-jewel init
 ### 3.1 多層自動トリガー（環境に応じて自動配線）
 
 Yasakani Jewel は「保存の瞬間」だけに頼らず、**4つの層**で監査をかけます。
-プロジェクトルートで `npx yasakani-jewel init` を一度実行するだけで、
+プロジェクトルートで `npx github:rartaty/yasakani-jewel-personal init` を一度実行するだけで、
 あなたの環境で使える層が **自動で配線** されます（追加の手動インストール不要）。
 
 | 層 | トリガー | 必要なもの |
@@ -125,7 +129,7 @@ Yasakani Jewel は「保存の瞬間」だけに頼らず、**4つの層**で監
 | **A. AIチャット連携** | AI（Claude/Cursor/Copilot）がコードを生成・変更する瞬間 | なし（指示書ポインタを各 AI 設定へ自動追記） |
 | **B. git pre-commit** | `git commit` 実行時 | git リポジトリ（フックを自動設置） |
 | **C. 保存時スキャン** | エディタでファイル保存（Ctrl+S） | VS Code / Cursor（Run on Save 拡張を自動インストール） |
-| **D. 手動** | `checkmaga` 入力 / `npx yasakani-jewel scan` 実行 | なし（いつでも使える） |
+| **D. 手動** | `checkmaga` 入力 / `npx github:rartaty/yasakani-jewel-personal scan` 実行 | なし（いつでも使える） |
 
 * **git 連携プロジェクト** → A+B+C+D すべて。
 * **git 非連携プロジェクト** → A+C+D（B のみ非対応）。
@@ -135,11 +139,11 @@ Yasakani Jewel は「保存の瞬間」だけに頼らず、**4つの層**で監
 > 「保存の瞬間」に処理を走らせるには、OS／エディタ仕様上どうしても
 > 「保存イベントを監視する誰か」が必要です。Yasakani Jewel は常駐デーモンを
 > 一切持たない方針のため、その役を Run on Save 拡張（層C）または git フック
-> （層B）に委ねています。どちらも `npx yasakani-jewel init` が自動で配線します。
+> （層B）に委ねています。どちらも `npx github:rartaty/yasakani-jewel-personal init` が自動で配線します。
 
 > [!TIP]
 > 層B（コミット時）でリスクが見つかると、秘密情報が履歴に入る前に
-> **コミットを中断**します。確認のうえ進める場合は `git commit --no-verify`。
+> **コミットを中断**します。検知内容または検査失敗を修正して再実行してください。worktree とプロジェクト内 `core.hooksPath` に対応し、既存 shell フックの先頭で検査します。非 shell フックや外部共有パス・外部へのリンクは保持して配線未完了を通知します。ローカルフックは回避できるため、CI の必須チェックも併用してください。
 
 ---
 
@@ -147,21 +151,25 @@ Yasakani Jewel は「保存の瞬間」だけに頼らず、**4つの層**で監
 コミット前や、任意のタイミングで手動でチェックしたい場合は、ターミナルで以下を叩くだけです。
 
 ```sh
-npx yasakani-jewel scan
+npx github:rartaty/yasakani-jewel-personal scan
 ```
+
+既存ファイルや `.gitignore` 対象を含めて確認するには `npx github:rartaty/yasakani-jewel-personal scan --all`、指定範囲だけなら `scan --all src config` を使います。`.git` / `node_modules` / `.yasakani` の探索、バイナリ資産、lockfile 本文は対象外です。過去の commit に残る秘密情報は `scan --history` で検査できます（ローカル全参照の reachable commit。shallow clone は不可、未取得のリモート履歴・reflog・submodule は別途検査）。
+
+フック用の `scan --staged` は実際の index 内容だけを検査します。終了コードは `0`（ブロック対象なし）、`1`（懸念あり）、`2`（読み取り・設定等の検査失敗）です。存在しない指定ファイル、シンボリックリンク、20 MiB 超ファイルは検査失敗になります。
 
 特定ファイルだけを確認したい場合は、パスを指定できます。git リポジトリ内でも、明示指定されたファイルを直接スキャンします。
 
 ```sh
-npx yasakani-jewel scan path/to/file.md
+npx github:rartaty/yasakani-jewel-personal scan path/to/file.md
 ```
 
 > [!NOTE]
 > **「何も警告が出ない（正常）」が最強の状態です。**
-> プレフィルターは0.001秒で検証を終え、安全であることを確認して沈黙します。PCの動作を重くすることは一切ありません。
+> プリフィルターはブロック対象が見つからなければ沈黙します。検査時間は対象量に依存し、無警告でも安全性の証明にはなりません。AI の自動起動は行わず、詳細監査は AI チャットで `checkmaga` を実行してください。
 > ハードコード秘密情報に加え、メールアドレス・日本の電話番号・郵便番号・住所らしき文字列・`氏名` / `名前` / `address` / `email` / `phone` 等のラベル付き個人情報も検知し、Git への混入をコミット前に止めます。
 > Markdown (`.md` / `.mdx`) では、通常の長文による高エントロピー誤検知を抑えつつ、`System Prompt`、`Tool Definitions`、`network_configuration`、`filesystem_configuration`、`Ignore previous instructions`、`{antml:...}` などの AI 指示書・プロンプト断片を検知します。
-> AI prompt Markdown は `.yasakani/prompt-policy.json` で扱いを分類します。既定では `prompts/public/**` は通知のみ、`prompts/private/**` と `private/**/system-prompt.md` は commit 禁止、`*.system-prompt.md` は強警告、未分類の prompt 断片は配置方針を確認するために停止します。git hook / CI 内で入力待ちは行いません。
+> AI への指示を含む Markdown は、`.yasakani/prompt-policy.json` に従って置き場所ごとに扱います。既定では、`prompts/public/**` は公開用サンプルとして通知だけを出し、commit は止めません。`prompts/private/**` と `private/**/system-prompt.md` は非公開ファイルとして commit を止めます。`*.system-prompt.md` は実運用の system prompt の可能性が高いため、強い警告を出して commit を止めます。どの分類にも当てはまらない場合も、誤って公開しないよう commit を止めます。ファイルを公開用・非公開用・実運用 prompt のいずれかの場所へ移動するか、policy にルールを追加してから再実行してください。git hook / CI は入力待ちをせず、必要な対応を警告として表示します。
 
 ---
 
@@ -289,3 +297,55 @@ AIは長文の解説を省き、コピペでそのまま置換できる **Before
 
 🔮 **Yasakani Jewel は、あなたの開発スピードを邪魔することなく、見えない盾となって資産とコードを守り続けます。**
 何か困ったことや、インシデントの不安がある時は、いつでもチャットで `checkmaga` と話しかけてください！
+
+## 8. 外部ログのオンデマンド点検
+
+外部の監視ツールからエクスポートしたローカルログを、一度だけ点検できます。Zero Daemon を維持し、監視ツールへの接続・通信遮断・鍵失効は実行しません。
+
+```sh
+npx github:rartaty/yasakani-jewel-personal audit logs events.jsonl
+npx github:rartaty/yasakani-jewel-personal audit logs events.jsonl --since 2026-09-11T00:00:00+09:00 --until 2026-10-11T23:59:59+09:00
+npx github:rartaty/yasakani-jewel-personal audit logs events.jsonl --profile profile.json --json
+npx github:rartaty/yasakani-jewel-personal audit logs events.jsonl --output checkmaga-reports/log-review.md
+```
+
+入力は **通常ファイルの UTF-8 JSON Lines（1行1 JSON object、最大20 MiB／50,000レコード）**。最後のコマンドは保存先の親ディレクトリを先に作成してください。既存ファイルを上書きしません。出力はローカル証跡として扱い、第三者へ生共有しないでください。導入先では保存先を Git 管理外にすることも確認してください。
+
+### 入力形式
+
+```json
+{"timestamp":"2026-10-11T09:00:00+09:00","event":"login","actor":"synthetic-actor","sourceIp":"198.51.100.1","status":"failure"}
+{"timestamp":"2026-10-11T09:01:00+09:00","event":"data_read","actor":"synthetic-actor","status":"success","bytes":104857600}
+{"timestamp":"2026-10-11T09:02:00+09:00","event":"role_change","actor":"synthetic-actor","status":"success"}
+```
+
+上記は架空の例。timestamp は timezone 付き ISO 日時、event／actor／status は全レコードで必須。actor は操作主体の識別子。event は login／data_read／egress／account_create／account_enable／role_change、status は success／failure。login の failure には有効な IPv4／IPv6 の sourceIp が必要。data_read／egress の success には非負の整数 bytes が必要で、不明な値を0で埋めないでください。提供した sourceIp／bytes の形式は他の event でも検査します。余分な raw payload・URL 等は分析・出力に使用しません。
+
+異なる製品のログは平坦な field と event／status の対応を profile JSON で指定できます。ネストされた JSON、CSV、syslog、EDR 独自形式は直接対応していません。ローカルで正規化してから渡してください。
+
+```json
+{
+  "fields": {"timestamp":"time","event":"operation","actor":"principal","sourceIp":"ip","status":"result","bytes":"size"},
+  "events": {"export":"data_read","permission_update":"role_change"},
+  "statuses": {"ok":"success","denied":"failure"},
+  "thresholds": {"windowSeconds":300,"loginFailures":10,"dataReadCount":1000,"dataReadBytes":104857600}
+}
+```
+
+profile は通常の UTF-8 JSON ファイル（最大1 MiB）。指定した値は既定の対応に追加・上書きされます。fields の key、対応先 event／status、thresholds の名前は上記のものだけを受け付けます。threshold は正の整数。スクリプトや外部取得は実行しません。
+
+### 判定と確認範囲
+
+- 同じ送信元から、既定で300秒以内に10件以上のログイン失敗。
+- 同じ主体・同じ event で、300秒以内に1,000件以上または100 MiB以上の取得／転送。data_read と egress は分けて数える。
+- 成功したアカウント作成・再有効化・権限変更。承認済みか元ログで確認する候補であり、通常の操作も含む。
+
+判定窓は入力順に依存しない sliding window。閾値判定は主体／送信元ごとに最初の到達を1候補として出し、権限変更は同じ主体・event をまとめます。候補は最大200件を表示し、総数と省略数を明示します。元の主体・IP は今回だけの対象番号に置き換え、行番号・UTC 日時を記録します。
+
+IPv6 の省略表記や IPv4-mapped IPv6 は正規化して同じ送信元として数えます。scope ID 付き IPv6 は対応外です。再現性のため入力テキスト（UTF-8 デコード・BOM 除去後）と解決済み profile の SHA-256 を記録します。hash はログの真正性を証明しません。
+
+全体の確認範囲は「提供ログを点検済み／設定コードは未確認／実環境は未確認」。ルールに該当するログがなければ、そのルールは「未検証」。候補が0件でも、対応ルールの範囲で所見がなかったという意味で、漏洩なし・環境全体の安全を証明しません。ログの真正性・完全性・欠落や通常時との比較も未検証です。
+
+期間指定は両端を含み、期間外レコードも形式を検査して除外件数を記録します。途中に不正行があれば全体を exit 2 とし、部分的な成功レポートは出しません。空ログ・全件期間外・不明形式・読取失敗も exit 2。exit 1 は調査候補、exit 0 は候補なし。stdout はレポート、stderr は生の値を含めない検査失敗の説明です。
+
+調査候補の妥当性を元ログ・通常利用・承認記録と照合し、異常が確認された場合は担当者へ連絡して証拠保全と対象サービス側の対応へ進めてください。

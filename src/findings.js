@@ -66,6 +66,40 @@ function normalizeLocation(location) {
   };
 }
 
+// Verification is a dated, scoped assertion from a checker, not a severity label.
+// Imported logs cannot establish the current state of a live environment.
+function normalizeVerification(input) {
+  const source = input && typeof input === 'object' ? input : {};
+  const result = {};
+  for (const area of ['code', 'runtime']) {
+    const item = source[area] && typeof source[area] === 'object' ? source[area] : {};
+    const scope = asString(item.scope, '');
+    const evidence = asArray(item.evidence).filter(value => value.trim());
+    const allowedKinds = area === 'code' ? ['source-review', 'config-review'] : ['live-config', 'live-test'];
+    const kind = allowedKinds.includes(item.kind) ? item.kind : null;
+    const checkedAt = asString(item.checkedAt, '');
+    const date = new Date(checkedAt);
+    const validDate = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(checkedAt)
+      && Number.isFinite(date.getTime())
+      && date.toISOString().replace('.000Z', 'Z') === checkedAt.replace('.000Z', 'Z');
+    const verified = item.status === 'verified' && kind && scope && evidence.length && validDate;
+    result[area] = verified
+      ? { status: 'verified', kind, scope, checkedAt: date.toISOString(), evidence }
+      : { status: 'unverified', kind: null, scope: '', checkedAt: null, evidence: [] };
+  }
+  return result;
+}
+
+function formatVerification(input) {
+  const verification = normalizeVerification(input);
+  const code = verification.code.status === 'verified';
+  const runtime = verification.runtime.status === 'verified';
+  if (code && runtime) return '設定コードを確認済み／実環境も確認済み';
+  if (code) return '設定コードを確認済み／実環境は未確認';
+  if (runtime) return '設定コードは未確認／実環境を確認済み';
+  return '設定コードは未確認／実環境は未確認';
+}
+
 function normalizeFinding(input) {
   const source = input && typeof input === 'object' ? input : {};
   const category = Object.values(CATEGORIES).includes(source.category) ? source.category : CATEGORIES.OTHER;
@@ -92,6 +126,7 @@ function normalizeFinding(input) {
     sources: asArray(source.sources),
     remediation: asString(source.remediation, ''),
     metadata: source.metadata && typeof source.metadata === 'object' ? { ...source.metadata } : {},
+    verification: normalizeVerification(source.verification),
   };
 }
 
@@ -115,6 +150,8 @@ function findingKey(finding) {
     loc.line === null ? '' : loc.line,
     loc.column === null ? '' : loc.column,
     finding.title,
+    // Do not merge observations with different dates/scopes into broader coverage.
+    JSON.stringify(finding.verification),
   ].join('|');
 }
 
@@ -164,4 +201,6 @@ module.exports = {
   normalizeFinding,
   mergeFindings,
   formatFalsePositiveLikelihood,
+  normalizeVerification,
+  formatVerification,
 };
